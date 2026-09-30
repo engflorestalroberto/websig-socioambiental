@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSIG Socioambiental</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        .map-container { height: 500px; width: 100%; border-radius: 0.5rem; z-index: 1; }
+        
+        /* OTIMIZAÇÃO AVANÇADA PARA IMPRESSÃO EM A4 */
+        @media print {
+            /* Força fundo branco e margens enxutas no papel */
+            @page { margin: 1cm; }
+            body { 
+                background-color: white !important; 
+                -webkit-print-color-adjust: exact !important; 
+                print-color-adjust: exact !important; 
+            }
+            #resultsArea { display: block !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+            
+            /* Ajuste do Mapa na impressão */
+            .map-container { 
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+            /* Oculta os botões de (+) e (-) do mapa no PDF */
+            .leaflet-control-container { display: none !important; }
+            
+            /* Remove sombras e bordas pesadas */
+            .shadow, .shadow-md, .shadow-lg { 
+                box-shadow: none !important; 
+                border: 1px solid #d1d5db !important; 
+            }
+            /* Protege os blocos de quebrarem no meio da folha */
+            .print-avoid-break { 
+                page-break-inside: avoid !important; 
+                break-inside: avoid !important;
+                display: block !important;
+            }
+        }
+
+        /* Classe especial injetada via JS para forçar o mapa a tomar o formato A4 ANTES da impressão */
+        .preparing-print {
+            width: 700px !important;
+            height: 380px !important;
+            margin: 0 auto !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans leading-normal tracking-normal text-gray-800">
+    
+    <nav class="bg-green-800 p-4 shadow-lg print:hidden">
+        <div class="container mx-auto flex items-center">
+            <svg class="h-8 w-8 text-white mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h1 class="text-white text-2xl font-bold tracking-wide">WebSIG Socioambiental</h1>
+        </div>
+    </nav>
+
+    <div class="container mx-auto mt-8 p-4 flex flex-wrap print:mt-0 print:p-0">
+        
+        <!-- Formulário (Escondido no PDF) -->
+        <div class="w-full md:w-1/3 p-4 bg-white rounded-lg shadow-md mb-8 md:mb-0 h-max print:hidden">
+            <h2 class="text-xl font-bold mb-4 text-green-800 border-b pb-2">Nova Consulta</h2>
+            
+            <form id="analiseForm">
+                <div class="mb-4 flex space-x-4">
+                    <div class="w-1/2">
+                        <label class="block text-sm font-bold mb-2">CPF/CNPJ (Opcional)</label>
+                        <input type="text" id="cpf_cnpj" name="cpf_cnpj" class="w-full p-2 border border-gray-300 rounded focus:ring-green-500" placeholder="Ex: 123.456.789-00">
+                    </div>
+                    <div class="w-1/2">
+                        <label class="block text-sm font-bold mb-2" title="Desmatamentos antes deste ano serão ignorados">Ano de Corte</label>
+                        <input type="number" id="ano_corte" name="ano_corte" class="w-full p-2 border border-gray-300 rounded focus:ring-green-500" placeholder="Ex: 2008" min="1980" max="2050">
+                    </div>
+                </div>
+                
+                <div class="mb-6">
+                    <label class="block text-sm font-bold mb-2">Arquivo da Fazenda (Polígono)</label>
+                    <input type="file" id="arquivo" name="arquivo" required accept=".kml,.kmz,.zip,.geojson" class="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-green-100 file:text-green-800 hover:file:bg-green-200">
+                </div>
+                
+                <button type="submit" id="btnSubmit" class="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded transition">
+                    Gerar Laudo Automático
+                </button>
+                
+                <div id="loadingBox" class="hidden mt-6 text-center">
+                    <svg class="animate-spin h-8 w-8 text-green-700 mx-auto mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <p class="text-green-800 font-semibold">Cruzando mapas...</p>
+                </div>
+                <div id="errorBox" class="hidden mt-4 bg-red-100 text-red-700 px-4 py-3 rounded"><span id="errorMsg"></span></div>
+            </form>
+            
+            <div id="legendaMapa" class="hidden mt-6 border-t pt-4">
+                <h3 class="font-bold text-sm text-gray-700 mb-2">Legenda do Mapa</h3>
+                <div class="flex items-center mb-1"><div class="w-4 h-4 bg-yellow-400 border border-yellow-600 opacity-50 mr-2"></div><span class="text-xs">Imóvel Analisado</span></div>
+                <div class="flex items-center mb-1"><div class="w-4 h-4 bg-red-600 border border-red-800 opacity-70 mr-2"></div><span class="text-xs">Desmatamento (PRODES)</span></div>
+                <div class="flex items-center mb-1"><div class="w-4 h-4 bg-orange-500 border border-orange-700 opacity-70 mr-2"></div><span class="text-xs">Embargo IBAMA</span></div>
+                <div class="flex items-center mb-1"><div class="w-4 h-4 bg-green-500 border border-green-700 opacity-70 mr-2"></div><span class="text-xs">Unidade de Conservação</span></div>
+                <div class="flex items-center mb-1"><div class="w-4 h-4 bg-purple-500 border border-purple-700 opacity-70 mr-2"></div><span class="text-xs">Área Quilombola</span></div>
+            </div>
+        </div>
+
+        <!-- DASHBOARD (Vai ocupar 100% na impressão) -->
+        <div class="w-full md:w-2/3 md:pl-8 hidden" id="resultsArea">
+            
+            <div class="flex justify-between items-center mb-6 print:mb-3 border-b pb-4 print:pb-2">
+                <div>
+                    <!-- Fontes reduzidas para PDF usando print:text-base, etc -->
+                    <h2 class="text-3xl print:text-xl font-bold text-gray-800 leading-tight">Laudo de Conformidade Socioambiental</h2>
+                    <p class="text-md print:text-xs text-gray-600 mt-1 print:mt-0" id="lblDocConsultado"></p>
+                    <span id="lblArea" class="bg-gray-200 text-gray-700 font-bold py-1 px-3 print:py-0.5 print:px-2 rounded-full text-sm print:text-xs inline-block mt-2 print:mt-1"></span>
+                </div>
+                
+                <button type="button" onclick="prepararEImprimir()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-5 rounded shadow print:hidden flex items-center transition">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+                    Salvar PDF
+                </button>
+            </div>
+            
+            <div class="grid grid-cols-2 lg:grid-cols-4 print:grid-cols-4 gap-4 print:gap-2 mb-6 print:mb-3 print-avoid-break">
+                <div id="cardProdes" class="bg-white rounded-lg shadow p-4 print:p-2 text-center border-t-4">
+                    <p class="text-xs print:text-[10px] text-gray-500 font-bold uppercase">PRODES</p><h3 class="text-xl print:text-sm font-bold mt-1" id="valProdes"></h3>
+                </div>
+                <div id="cardIbama" class="bg-white rounded-lg shadow p-4 print:p-2 text-center border-t-4">
+                    <p class="text-xs print:text-[10px] text-gray-500 font-bold uppercase">IBAMA</p><h3 class="text-xl print:text-sm font-bold mt-1" id="valIbama"></h3>
+                </div>
+                <div id="cardUc" class="bg-white rounded-lg shadow p-4 print:p-2 text-center border-t-4">
+                    <p class="text-xs print:text-[10px] text-gray-500 font-bold uppercase">Conservação</p><h3 class="text-xl print:text-sm font-bold mt-1" id="valUc"></h3>
+                </div>
+                <div id="cardQuilombo" class="bg-white rounded-lg shadow p-4 print:p-2 text-center border-t-4">
+                    <p class="text-xs print:text-[10px] text-gray-500 font-bold uppercase">Quilombola</p><h3 class="text-xl print:text-sm font-bold mt-1" id="valQuilombo"></h3>
+                </div>
+            </div>
+
+            <!-- Trabalho Escravo -->
+            <div class="bg-white rounded-lg shadow mb-6 print:mb-3 overflow-hidden print-avoid-break">
+                <div class="p-4 print:p-2 border-b bg-gray-50 flex items-center">
+                    <h3 class="font-bold print:text-sm text-gray-800">Trabalho Escravo (MTE)</h3>
+                    <span id="lblVersaoLista" class="ml-auto text-xs print:text-[10px] text-gray-500 bg-gray-200 py-1 px-2 rounded"></span>
+                </div>
+                <div class="p-4 print:p-2 flex items-start" id="boxTrabalhoEscravo">
+                    <div id="iconeEscravo" class="h-10 w-10 print:h-6 print:w-6 rounded-full flex items-center justify-center mr-4 mt-1 flex-shrink-0 bg-gray-200 print:text-xs"></div>
+                    <div class="flex-1">
+                        <p id="msgEscravo" class="font-bold text-gray-700 print:text-xs"></p>
+                        <div id="detalhesEscravo" class="mt-2 print:mt-1"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Histórico de Desmatamento -->
+            <div class="bg-white rounded-lg shadow mb-6 print:mb-3 overflow-hidden hidden print-avoid-break" id="boxHistoricoProdes">
+                <div class="p-4 print:p-2 border-b bg-gray-50 flex items-center">
+                    <h3 class="font-bold print:text-sm text-gray-800">Histórico de Desmatamento (PRODES)</h3>
+                    <span class="ml-auto text-xs print:text-[10px] text-gray-500 bg-gray-200 py-1 px-2 rounded">Versão: 30/03/2026</span>
+                </div>
+                <div class="p-4 print:p-2">
+                    <ul id="listaHistorico" class="divide-y divide-gray-200"></ul>
+                </div>
+            </div>
+
+            <!-- Mapa Interativo -->
+            <div class="bg-white rounded-lg shadow overflow-hidden border border-gray-300 print-avoid-break" style="margin-bottom: 0;">
+                <div class="p-4 print:p-2 border-b bg-gray-50 flex justify-between items-center">
+                    <h3 class="font-bold print:text-sm text-gray-800">Mapa de Localização e Alertas</h3>
+                    <p id="lblMunicipios" class="text-sm print:text-xs text-gray-600 font-semibold"></p>
+                </div>
+                <div id="map" class="map-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let mapInstance = null;
+        let layersGroup = null; 
+
+        function initMap() {
+            mapInstance = L.map('map').setView([-14.235, -51.925], 4);
+            L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                maxZoom: 20,
+                attribution: '© Google Maps'
+            }).addTo(mapInstance);
+            layersGroup = L.featureGroup().addTo(mapInstance);
+        }
+        initMap();
+
+        // O Segredo Definitivo para o Mapa: Forçar o container a tomar o tamanho de uma folha A4 
+        // ANTES de chamar o print. Assim ele calcula o centro com precisão absoluta.
+        function prepararEImprimir() {
+            const mapDiv = document.getElementById('map');
+            
+            // 1. Trava o mapa no tamanho exato que ele terá no PDF
+            mapDiv.classList.add('preparing-print');
+            
+            if (mapInstance) {
+                mapInstance.invalidateSize();
+                if (layersGroup && layersGroup.getLayers().length > 0) {
+                    // Centraliza adicionando uma margem de "respiro" de 30px
+                    mapInstance.fitBounds(layersGroup.getBounds(), { padding: [30, 30] });
+                }
+            }
+            
+            // 2. Espera 800ms para baixar todas as imagens do Google no novo tamanho
+            setTimeout(() => {
+                window.print();
+                
+                // 3. Após abrir a tela de PDF, destrava o mapa para voltar ao tamanho da tela
+                setTimeout(() => {
+                    mapDiv.classList.remove('preparing-print');
+                    if (mapInstance) {
+                        mapInstance.invalidateSize();
+                        if (layersGroup && layersGroup.getLayers().length > 0) {
+                            mapInstance.fitBounds(layersGroup.getBounds(), { padding: [30, 30] });
+                        }
+                    }
+                }, 1000);
+            }, 800);
+        }
+
+        window.addEventListener('beforeprint', function() {
+            if (mapInstance && !document.getElementById('map').classList.contains('preparing-print')) {
+                mapInstance.invalidateSize();
+            }
+        });
+
+        function configurarCardRisco(idCard, idValor, valor_ha) {
+            const card = document.getElementById(idCard);
+            const val = document.getElementById(idValor);
+            val.innerText = valor_ha + " ha";
+            card.classList.remove('border-gray-300', 'border-red-500', 'border-green-500');
+            if (valor_ha > 0) {
+                card.classList.add('border-red-500'); val.classList.add('text-red-600');
+            } else {
+                card.classList.add('border-green-500'); val.classList.add('text-green-600');
+            }
+        }
+
+        function desenharAlerta(geojson, cor, titulo) {
+            if(!geojson || geojson.length === 0) return;
+            L.geoJSON(geojson, {
+                style: { color: cor, weight: 2, fillOpacity: 0.7, fillColor: cor },
+                onEachFeature: function (feature, layer) {
+                    let popupHTML = `<div class='text-sm'><b>${titulo}</b><br>`;
+                    for (const [key, value] of Object.entries(feature.properties)) {
+                        popupHTML += `<b>${key.toUpperCase()}:</b> ${value}<br>`;
+                    }
+                    popupHTML += "</div>";
+                    layer.bindPopup(popupHTML);
+                }
+            }).addTo(layersGroup);
+        }
+
+        document.getElementById('analiseForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const btnSubmit = document.getElementById('btnSubmit');
+            const loadingBox = document.getElementById('loadingBox');
+            const resultsArea = document.getElementById('resultsArea');
+            const legendaMapa = document.getElementById('legendaMapa');
+            
+            btnSubmit.disabled = true; btnSubmit.classList.add('opacity-50');
+            loadingBox.classList.remove('hidden'); resultsArea.classList.add('hidden'); legendaMapa.classList.add('hidden');
+            
+            const formData = new FormData();
+            formData.append('arquivo', document.getElementById('arquivo').files[0]);
+            const cpfCnpj = document.getElementById('cpf_cnpj').value;
+            if (cpfCnpj) formData.append('cpf_cnpj', cpfCnpj);
+            const anoCorte = document.getElementById('ano_corte').value;
+            if (anoCorte) formData.append('ano_corte', anoCorte);
+
+            try {
+                const resposta = await fetch('http://localhost:8000/analise/upload-poligono/', { method: 'POST', body: formData });
+                if (!resposta.ok) throw new Error("Erro no servidor da API.");
+                
+                const dados = await resposta.json();
+                const relatorio = dados.relatorio_socioambiental;
+                
+                const doc = relatorio.documento_consultado;
+                document.getElementById('lblDocConsultado').innerText = doc ? `Titular Consultado: ${doc}` : 'Titular: Não informado';
+                document.getElementById('lblArea').innerText = `Área: ${relatorio.imovel.area_imovel_ha} ha`;
+                document.getElementById('lblMunicipios').innerText = relatorio.imovel.municipios.join(", ");
+                
+                const alertas = relatorio.resumo_alertas_espaciais;
+                configurarCardRisco('cardProdes', 'valProdes', alertas.desmatamento_prodes_ha);
+                configurarCardRisco('cardIbama', 'valIbama', alertas.embargos_ibama_ha);
+                configurarCardRisco('cardUc', 'valUc', alertas.unidades_conservacao_ha);
+                configurarCardRisco('cardQuilombo', 'valQuilombo', alertas.terras_quilombolas_ha);
+
+                const trabEsc = relatorio.trabalho_escravo;
+                const icone = document.getElementById('iconeEscravo');
+                const box = document.getElementById('boxTrabalhoEscravo');
+                const detalhes = document.getElementById('detalhesEscravo');
+                
+                icone.className = "h-10 w-10 print:h-6 print:w-6 rounded-full flex items-center justify-center mr-4 mt-1 flex-shrink-0 bg-gray-200 print:text-xs";
+                box.className = "p-4 print:p-2 flex items-start";
+                detalhes.innerHTML = "";
+                
+                if (trabEsc) {
+                    document.getElementById('msgEscravo').innerText = trabEsc.mensagem;
+                    document.getElementById('lblVersaoLista').innerText = "Versão: " + (trabEsc.versao_lista || "-");
+                    
+                    if (trabEsc.status.includes("ALERTA")) {
+                        icone.classList.add("bg-red-500", "text-white"); icone.innerHTML = "❌"; box.classList.add("bg-red-50");
+                        // Ajustado para fontes minúsculas na impressão
+                        let h = '<div class="mt-3 print:mt-1 grid grid-cols-1 md:grid-cols-2 print:grid-cols-2 gap-3 print:gap-1 text-sm print:text-[10px] text-red-900 bg-red-100 p-3 print:p-2 rounded border border-red-200 w-full">';
+                        for (const [k, v] of Object.entries(trabEsc.dados_infracao || {})) {
+                            if (k !== 'ID' && v !== 'nan' && v !== null) h += `<div><span class="font-bold block text-xs print:text-[9px] uppercase text-red-700">${k}</span> ${v}</div>`;
+                        }
+                        detalhes.innerHTML = h + '</div>';
+                    } else if (trabEsc.status.includes("REGULAR")) {
+                        icone.classList.add("bg-green-500", "text-white"); icone.innerHTML = "✅";
+                        detalhes.innerHTML = "<p class='text-sm print:text-[10px] text-gray-500 mt-1'>Tudo certo.</p>";
+                    }
+                }
+
+                const hist = relatorio.detalhes_desmatamento;
+                const boxHistorico = document.getElementById('boxHistoricoProdes');
+                const listaHistorico = document.getElementById('listaHistorico');
+                listaHistorico.innerHTML = "";
+                boxHistorico.classList.remove('hidden');
+                
+                if (hist && hist.length > 0) {
+                    hist.sort((a, b) => (a.ano || "").localeCompare(b.ano || ""));
+                    hist.forEach(item => {
+                        const li = document.createElement('li');
+                        li.className = "py-3 print:py-1 flex justify-between items-center";
+                        li.innerHTML = `
+                            <div class="flex items-center">
+                                <span class="bg-red-100 text-red-800 text-xs print:text-[10px] font-bold px-2.5 py-1 print:py-0.5 rounded mr-3">Ano: ${item.ano}</span>
+                                <span class="text-sm print:text-xs text-gray-600">Bioma: ${item.bioma}</span>
+                            </div>
+                            <span class="text-sm print:text-xs font-bold text-red-700">${Number(item.area_ha).toFixed(2)} ha</span>
+                        `;
+                        listaHistorico.appendChild(li);
+                    });
+                } else {
+                    listaHistorico.innerHTML = '<li class="py-3 print:py-1 text-sm print:text-xs text-green-600 font-semibold">Nenhum desmatamento identificado ou foram desconsiderados pela Data de Corte.</li>';
+                }
+
+                layersGroup.clearLayers(); 
+                const fazendaLayer = L.geoJSON(dados.geometria_do_mapa, {
+                    style: { color: "#FFD700", weight: 3, fillOpacity: 0.2 },
+                    interactive: false 
+                }).addTo(layersGroup);
+                
+                const geom = relatorio.geometrias_alerta;
+                if(geom) {
+                    desenharAlerta(geom.prodes, "#dc2626", "Alerta PRODES");       
+                    desenharAlerta(geom.ibama, "#ea580c", "Embargo IBAMA");        
+                    desenharAlerta(geom.ucs, "#16a34a", "Unidade Conservação");    
+                    desenharAlerta(geom.quilombolas, "#9333ea", "Área Quilombola"); 
+                }
+                
+                resultsArea.classList.remove('hidden');
+                legendaMapa.classList.remove('hidden');
+                
+                // Recalculo do mapa para visualização web
+                setTimeout(() => {
+                    mapInstance.invalidateSize();
+                    mapInstance.fitBounds(layersGroup.getBounds());
+                }, 200);
+                
+            } catch (err) {
+                document.getElementById('errorMsg').innerText = err.message;
+                document.getElementById('errorBox').classList.remove('hidden');
+            } finally {
+                loadingBox.classList.add('hidden');
+                btnSubmit.disabled = false; btnSubmit.classList.remove('opacity-50');
+            }
+        });
+    </script>
+</body>
+</html>

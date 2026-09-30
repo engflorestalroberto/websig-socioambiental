@@ -1,0 +1,8 @@
+fastapi==0.109.2
+uvicorn==0.27.1
+python-multipart==0.0.9
+geopandas==0.14.3
+fiona==1.9.5
+shapely==2.0.2
+numpy<2.0.0
+google-cloud-bigquery==3.17.2
